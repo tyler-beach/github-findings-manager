@@ -1,139 +1,133 @@
 # GitHub Findings Manager Makefile
 
-.PHONY: build test lint clean install
+.PHONY: build clean test install deps help lint run-example
 
 # Variables
-APP_NAME := github-findings-manager
-VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
-COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
-LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildTime=$(BUILD_TIME)
-
-# Go variables
-GOCMD := go
-GOBUILD := $(GOCMD) build
-GOTEST := $(GOCMD) test
-GOGET := $(GOCMD) get
-GOMOD := $(GOCMD) mod
-GOFMT := gofmt
-GOLINT := golangci-lint
-
-# Build targets
-build:
-	@echo "Building $(APP_NAME) $(VERSION)..."
-	$(GOBUILD) -ldflags="$(LDFLAGS)" -o bin/$(APP_NAME) ./cmd/github-findings-manager
-
-build-all: clean
-	@echo "Building for all platforms..."
-	GOOS=darwin GOARCH=amd64 $(GOBUILD) -ldflags="$(LDFLAGS)" -o bin/$(APP_NAME)-darwin-amd64 ./cmd/github-findings-manager
-	GOOS=darwin GOARCH=arm64 $(GOBUILD) -ldflags="$(LDFLAGS)" -o bin/$(APP_NAME)-darwin-arm64 ./cmd/github-findings-manager
-	GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="$(LDFLAGS)" -o bin/$(APP_NAME)-linux-amd64 ./cmd/github-findings-manager
-	GOOS=windows GOARCH=amd64 $(GOBUILD) -ldflags="$(LDFLAGS)" -o bin/$(APP_NAME)-windows-amd64.exe ./cmd/github-findings-manager
-
-# Development targets
-test:
-	@echo "Running tests..."
-	$(GOTEST) -v -race -coverprofile=coverage.out ./...
-
-test-coverage: test ## Run tests with coverage report
-	@echo "Generating coverage report..."
-	$(GOCMD) tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report generated: coverage.html"
-
-benchmark: ## Run benchmarks
-	@echo "Running benchmarks..."
-	$(GOTEST) -bench=. -benchmem ./...
-
-lint:
-	@echo "Running linter..."
-	$(GOLINT) run
-
-fmt: ## Format code
-	@echo "Formatting code..."
-	$(GOFMT) -s -w .
-	$(GOCMD) mod tidy
-
-deps:
-	@echo "Downloading dependencies..."
-	$(GOMOD) download
-	$(GOMOD) verify
-	$(GOMOD) tidy
-	$(GOGET) github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-# Installation targets
-install: build
-	@echo "Installing $(APP_NAME)..."
-	mv bin/$(APP_NAME) /usr/local/bin/$(APP_NAME)
-
-# Utility targets
-clean:
-	@echo "Cleaning..."
-	rm -rf bin/
-	rm -f coverage.out coverage.html
-	rm -f *.db *.xlsx *.csv
-
-run: build ## Build and run the application
-	@echo "Running $(APP_NAME)..."
-	./bin/$(APP_NAME) --help
-
-run-example: build ## Run with example parameters
-	@echo "Running example..."
-	./bin/$(APP_NAME) --org example-org --env-type Production --verbose
-
-# Release targets
-release-prep: clean fmt lint test build-all ## Prepare for release
-	@echo "Release preparation complete"
-
-# Database targets
-db-clean: ## Clean database files
-	rm -f *.db
-
-db-reset: db-clean ## Reset database
-	@echo "Database reset complete"
-
-# Performance targets
-profile-cpu: build ## Run CPU profiling
-	@echo "Running CPU profiling..."
-	./bin/$(APP_NAME) --org $(ORG) --profile-cpu cpu.prof
-
-profile-mem: build ## Run memory profiling
-	@echo "Running memory profiling..."
-	./bin/$(APP_NAME) --org $(ORG) --profile-mem mem.prof
-
-# Security targets
-security-scan: ## Run security scan
-	@echo "Running security scan..."
-	$(GOCMD) list -json -m all | nancy sleuth
-
-vuln-check: ## Check for vulnerabilities
-	@echo "Checking for vulnerabilities..."
-	$(GOCMD) list -json -m all | nancy sleuth
-
-# Documentation targets
-docs: ## Generate documentation
-	@echo "Generating documentation..."
-	$(GOCMD) doc -all > docs/api.md
-
-# CI/CD targets
-ci-test: lint test ## Run CI tests
-	@echo "CI tests complete"
-
-ci-build: build test ## CI build pipeline
-	@echo "CI build complete"
-
-ci-deploy: release-prep ## CI deployment pipeline
-	@echo "CI deployment complete"
-
-# Help target
-help: ## Show this help message
-	@echo "Available targets:"
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+BINARY_NAME=github-findings-manager
+VERSION?=1.0.0
+BUILD_DIR=./bin
+GO_FILES=$(shell find . -name "*.go" -type f)
 
 # Default target
-.DEFAULT_GOAL := help
+help: ## Show this help message
+	@echo "GitHub Findings Manager"
+	@echo "Available targets:"
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-# Version information
-version: ## Show version information
-	@echo "$(APP_NAME) $(VERSION)"
-	@echo "Commit: $(COMMIT)"
-	@echo "Build Time: $(BUILD_TIME)" 
+# Build targets
+build: ## Build the binary
+	@echo "Building $(BINARY_NAME)..."
+	@mkdir -p $(BUILD_DIR)
+	go build -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME) .
+
+build-all: ## Build for all platforms
+	@echo "Building for all platforms..."
+	@mkdir -p $(BUILD_DIR)
+	GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 .
+	GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 .
+	GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 .
+	GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=$(VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe .
+
+# Dependencies
+deps: ## Download dependencies
+	@echo "Downloading dependencies..."
+	go mod download
+	go mod tidy
+
+# Development
+test: ## Run tests
+	@echo "Running tests..."
+	go test -v ./...
+
+test-coverage: ## Run tests with coverage
+	@echo "Running tests with coverage..."
+	go test -v -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
+
+lint: ## Run linter
+	@echo "Running linter..."
+	golangci-lint run
+
+format: ## Format code
+	@echo "Formatting code..."
+	go fmt ./...
+
+# Installation
+install: build ## Install binary to GOPATH/bin
+	@echo "Installing $(BINARY_NAME)..."
+	cp $(BUILD_DIR)/$(BINARY_NAME) $(GOPATH)/bin/
+
+# Cleanup
+clean: ## Clean build artifacts
+	@echo "Cleaning up..."
+	rm -rf $(BUILD_DIR)
+	rm -f coverage.out coverage.html
+	rm -rf cache/
+	rm -rf reports/
+
+# Example runs
+run-example: build ## Run example with sample organization
+	@echo "Running example (requires GITHUB_TOKEN environment variable)..."
+	@if [ -z "$(GITHUB_TOKEN)" ]; then \
+		echo "Error: GITHUB_TOKEN environment variable is required"; \
+		exit 1; \
+	fi
+	$(BUILD_DIR)/$(BINARY_NAME) --org $(ORG) --verbose
+
+run-help: build ## Show help for the built binary
+	$(BUILD_DIR)/$(BINARY_NAME) --help
+
+# Development helpers
+dev-setup: ## Set up development environment
+	@echo "Setting up development environment..."
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go mod download
+
+# Docker (optional)
+docker-build: ## Build Docker image
+	docker build -t github-findings-manager:$(VERSION) .
+
+# Release preparation
+release-prep: clean deps test lint build-all ## Prepare for release
+	@echo "Release preparation complete"
+	@echo "Artifacts in $(BUILD_DIR):"
+	@ls -la $(BUILD_DIR)/
+
+# Benchmarks
+benchmark: ## Run benchmarks
+	@echo "Running benchmarks..."
+	go test -bench=. -benchmem ./...
+
+# Security check
+security-check: ## Run security checks
+	@echo "Running security checks..."
+	go list -json -deps ./... | nancy sleuth
+
+# Generate documentation
+docs: ## Generate documentation
+	@echo "Generating documentation..."
+	godoc -http=:6060 &
+	@echo "Documentation server started at http://localhost:6060"
+
+# Quick development cycle
+dev: format lint test build ## Quick development cycle: format, lint, test, build
+
+# Usage examples
+examples: ## Show usage examples
+	@echo "Usage examples:"
+	@echo ""
+	@echo "1. Basic usage:"
+	@echo "   ./$(BUILD_DIR)/$(BINARY_NAME) --org myorg"
+	@echo ""
+	@echo "2. Specific repositories:"
+	@echo "   ./$(BUILD_DIR)/$(BINARY_NAME) --org myorg --repos 'repo1,repo2'"
+	@echo ""
+	@echo "3. Filter by pod:"
+	@echo "   ./$(BUILD_DIR)/$(BINARY_NAME) --org myorg --pod 'platform,security'"
+	@echo ""
+	@echo "4. Generate CSV output:"
+	@echo "   ./$(BUILD_DIR)/$(BINARY_NAME) --org myorg --csv"
+	@echo ""
+	@echo "5. Custom output directory:"
+	@echo "   ./$(BUILD_DIR)/$(BINARY_NAME) --org myorg --output /path/to/reports" 
