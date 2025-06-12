@@ -6,7 +6,7 @@ A high-performance CLI tool for collecting and reporting GitHub security finding
 
 - Collects CodeQL, Secrets Scanning, and Dependabot findings
 - Filters repositories by EnvironmentType custom property
-- Collects Pod ownership data
+- Collects pod ownership data
 - Generates comprehensive Excel reports
 - Supports parallel processing and caching
 - Rate limit aware with exponential backoff

@@ -244,10 +244,10 @@ func (c *Client) fetchCustomProperties(ctx context.Context, repo *models.Reposit
 				repo.EnvironmentType = val
 				repo.CustomProperties["EnvironmentType"] = val
 			}
-		} else if prop.PropertyName == "Pod" {
+		} else if prop.PropertyName == "pod" {
 			if val, ok := prop.Value.(string); ok {
 				repo.Pod = val
-				repo.CustomProperties["Pod"] = val
+				repo.CustomProperties["pod"] = val
 			}
 		} else {
 			// Store other custom properties as strings

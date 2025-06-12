@@ -167,10 +167,10 @@ export GITHUB_FINDINGS_CACHE_DURATION=6h
 ```
 
 ### 4. Custom Properties Not Found
-If your organization doesn't use custom properties, the tool will still work but will show "Unknown" for Pod and EnvironmentType. To fix this:
+If your organization doesn't use custom properties, the tool will still work but will show "Unknown" for pod and EnvironmentType. To fix this:
 
 1. Set up GitHub custom properties in your organization
-2. Add `EnvironmentType` and `Pod` properties to repositories
+2. Add `EnvironmentType` and `pod` properties to repositories
 3. Re-run the scan
 
 ## Next Steps

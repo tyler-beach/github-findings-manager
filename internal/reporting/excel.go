@@ -489,7 +489,7 @@ func (r *ExcelReporter) createDetailedFindingsSheet(f *excelize.File, findings [
 		row := i + 2
 		repoName := "Unknown"
 		owner := "Unknown"
-		pod := "Unknown"
+		pod := "No Pod Selected"
 		if finding.Repository != nil {
 			repoName = finding.Repository.FullName
 			owner = finding.Repository.Owner
@@ -761,7 +761,7 @@ func (r *ExcelReporter) GenerateCSV(findings []*models.Finding, csvPath string) 
 	for _, finding := range findings {
 		repoName := "Unknown"
 		owner := "Unknown"
-		pod := "Unknown"
+		pod := "No Pod Selected"
 		if finding.Repository != nil {
 			repoName = finding.Repository.FullName
 			owner = finding.Repository.Owner
