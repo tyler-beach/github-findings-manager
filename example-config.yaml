@@ -1,0 +1,319 @@
+# GitHub Findings Manager Configuration
+# This file contains all available configuration options with their default values.
+# You can customize these settings based on your organization's needs.
+
+# GitHub API Configuration
+github:
+  # GitHub Personal Access Token with required permissions:
+  # - repo (for private repositories)
+  # - security_events (for security findings)
+  # - read:org (for organization access)
+  token: "${GITHUB_TOKEN}"  # Can be set via environment variable
+  
+  # GitHub API base URL (for GitHub Enterprise)
+  # Default: https://api.github.com
+  base_url: "https://api.github.com"
+  
+  # GitHub upload base URL (for GitHub Enterprise)
+  # Default: https://uploads.github.com
+  upload_url: "https://uploads.github.com"
+
+# Organization Settings
+organization:
+  # Name of the GitHub organization to scan
+  name: "your-organization"
+  
+  # Environment type filter for repositories
+  # Only repositories with this EnvironmentType custom property will be processed
+  environment_type: "Production"
+  
+  # Additional filters (optional)
+  filters:
+    # Only scan repositories with specific topics
+    topics: []
+    
+    # Only scan repositories with specific languages
+    languages: []
+    
+    # Exclude archived repositories
+    exclude_archived: true
+    
+    # Exclude forked repositories
+    exclude_forks: true
+
+# Performance Settings
+performance:
+  # Maximum number of concurrent workers for parallel processing
+  # Recommended: 5-15 depending on GitHub rate limits
+  max_workers: 10
+  
+  # Rate limiting configuration
+  rate_limit:
+    # Requests per minute (should be less than GitHub's limit)
+    requests_per_minute: 80
+    
+    # Burst size for temporary rate spikes
+    burst_size: 10
+  
+  # Retry configuration
+  retry:
+    # Maximum number of retry attempts
+    max_attempts: 3
+    
+    # Initial delay between retries
+    initial_delay: "2s"
+    
+    # Maximum delay between retries
+    max_delay: "30s"
+    
+    # Exponential backoff multiplier
+    backoff_multiplier: 2.0
+
+# Caching Configuration
+cache:
+  # Enable caching to improve performance
+  enabled: true
+  
+  # Cache duration for API responses
+  duration: "24h"
+  
+  # Cache cleanup interval
+  cleanup_interval: "1h"
+  
+  # Enable ETag-based conditional requests
+  etag_enabled: true
+  
+  # Maximum cache size (in MB)
+  max_size_mb: 500
+
+# Database Configuration
+database:
+  # Path to SQLite database file
+  path: "./findings.db"
+  
+  # Connection pool settings
+  connection_pool:
+    max_open_connections: 25
+    max_idle_connections: 25
+    connection_max_lifetime: "5m"
+  
+  # Database optimization settings
+  optimization:
+    journal_mode: "WAL"
+    synchronous: "NORMAL"
+    cache_size: 1000
+    temp_store: "memory"
+
+# Output Configuration
+output:
+  # Default output file path
+  path: "./findings-report.xlsx"
+  
+  # Excel report settings
+  excel:
+    # Include charts in the report
+    include_charts: true
+    
+    # Include pivot tables
+    include_pivot_tables: true
+    
+    # Sheet naming convention
+    sheet_naming:
+      use_quarter_prefix: true
+      max_name_length: 31
+  
+  # CSV export settings
+  csv:
+    # Enable CSV fallback export
+    enabled: true
+    
+    # CSV delimiter
+    delimiter: ","
+    
+    # Include header row
+    include_header: true
+  
+  # JSON export settings (for CI/CD integration)
+  json:
+    # Enable JSON export
+    enabled: false
+    
+    # Pretty print JSON
+    pretty_print: true
+    
+    # Include raw GitHub API responses
+    include_raw_data: false
+
+# Logging Configuration
+logging:
+  # Log level: debug, info, warn, error
+  level: "info"
+  
+  # Log format: text, json
+  format: "text"
+  
+  # Enable timestamp in logs
+  timestamp: true
+  
+  # Log file path (optional, logs to stdout if not specified)
+  file: ""
+  
+  # Maximum log file size (in MB)
+  max_size_mb: 100
+  
+  # Maximum number of log files to keep
+  max_backups: 5
+  
+  # Maximum age of log files (in days)
+  max_age_days: 30
+
+# Security Settings
+security:
+  # TLS verification settings
+  tls:
+    # Skip TLS certificate verification (not recommended for production)
+    insecure_skip_verify: false
+    
+    # Custom CA certificate file path
+    ca_cert_file: ""
+  
+  # Proxy settings
+  proxy:
+    # HTTP proxy URL
+    http: ""
+    
+    # HTTPS proxy URL
+    https: ""
+    
+    # No proxy hosts (comma-separated)
+    no_proxy: ""
+  
+  # Data privacy settings
+  privacy:
+    # Exclude sensitive data from logs
+    exclude_sensitive_logs: true
+    
+    # Mask GitHub tokens in logs
+    mask_tokens: true
+    
+    # Anonymize repository names in logs
+    anonymize_repos: false
+
+# Reporting Configuration
+reporting:
+  # Include sections in the report
+  sections:
+    dashboard: true
+    summary: true
+    detailed_findings: true
+    repositories: true
+    quarterly_analysis: true
+  
+  # Chart types to include
+  charts:
+    pie_charts: true
+    bar_charts: true
+    line_charts: true
+    scatter_plots: false
+  
+  # Data aggregation settings
+  aggregation:
+    # Group findings by quarter
+    quarterly_grouping: true
+    
+    # Include trending analysis
+    trending_analysis: true
+    
+    # Calculate risk scores
+    risk_scoring: true
+  
+  # Filtering options for the report
+  filters:
+    # Minimum severity level to include
+    min_severity: "low"
+    
+    # Maximum age of findings (in days)
+    max_age_days: 365
+    
+    # Include only open findings
+    open_only: false
+
+# Custom Properties Mapping
+custom_properties:
+  # Map GitHub custom property names to internal field names
+  environment_type:
+    property_name: "EnvironmentType"
+    default_value: "Unknown"
+  
+  pod:
+    property_name: "Pod"
+    default_value: "Unassigned"
+  
+  team:
+    property_name: "Team"
+    default_value: "Unknown"
+  
+  cost_center:
+    property_name: "CostCenter"
+    default_value: "Unknown"
+
+# Integration Settings
+integrations:
+  # Webhook notifications
+  webhooks:
+    # Slack webhook URL for notifications
+    slack_url: ""
+    
+    # Microsoft Teams webhook URL
+    teams_url: ""
+    
+    # Generic webhook URL
+    generic_url: ""
+  
+  # Email notifications
+  email:
+    # SMTP server configuration
+    smtp_server: ""
+    smtp_port: 587
+    smtp_username: ""
+    smtp_password: ""
+    
+    # Email recipients
+    recipients: []
+    
+    # Email subject template
+    subject_template: "GitHub Security Findings Report - {{.Date}}"
+  
+  # JIRA integration
+  jira:
+    # JIRA base URL
+    base_url: ""
+    
+    # JIRA credentials
+    username: ""
+    api_token: ""
+    
+    # Project key for creating issues
+    project_key: ""
+    
+    # Issue type for security findings
+    issue_type: "Bug"
+
+# Development and Testing
+development:
+  # Enable debug mode
+  debug: false
+  
+  # Enable profiling
+  profiling:
+    enabled: false
+    cpu_profile: "cpu.prof"
+    memory_profile: "mem.prof"
+  
+  # Mock data for testing
+  mock:
+    enabled: false
+    mock_data_file: "test-data.json"
+  
+  # Dry run mode (don't make actual API calls)
+  dry_run: false 
