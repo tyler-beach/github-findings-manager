@@ -21,24 +21,49 @@ func (r *Reporter) GenerateExcelReport(results *models.CollectionResults) error 
 	f := excelize.NewFile()
 	defer f.Close()
 
+	// Create common styles
+	headerStyle, err := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true, Color: "FFFFFF"},
+		Fill: excelize.Fill{Type: "pattern", Color: []string{"366092"}, Pattern: 1},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create header style: %w", err)
+	}
+
+	subHeaderStyle, err := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+		Fill: excelize.Fill{Type: "pattern", Color: []string{"E7E6E6"}, Pattern: 1},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create subheader style: %w", err)
+	}
+
+	highCriticalStyle, err := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+		Fill: excelize.Fill{Type: "pattern", Color: []string{"FFE0E0"}, Pattern: 1}, // Light red background
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create high/critical style: %w", err)
+	}
+
 	// Create sheets
-	if err := r.createFindingsSheet(f, results); err != nil {
+	if err := r.createFindingsSheet(f, results, headerStyle); err != nil {
 		return fmt.Errorf("failed to create findings sheet: %w", err)
 	}
 
-	if err := r.createSummarySheet(f, results); err != nil {
+	if err := r.createSummarySheet(f, results, headerStyle, subHeaderStyle, highCriticalStyle); err != nil {
 		return fmt.Errorf("failed to create summary sheet: %w", err)
 	}
 
-	if err := r.createRepositorySheet(f, results); err != nil {
+	if err := r.createRepositorySheet(f, results, headerStyle); err != nil {
 		return fmt.Errorf("failed to create repository sheet: %w", err)
 	}
 
-	if err := r.createTimelineSheet(f, results); err != nil {
+	if err := r.createTimelineSheet(f, results, headerStyle, subHeaderStyle); err != nil {
 		return fmt.Errorf("failed to create timeline sheet: %w", err)
 	}
 
-	if err := r.createPivotDashboard(f, results); err != nil {
+	if err := r.createPivotDashboard(f, results, headerStyle); err != nil {
 		return fmt.Errorf("failed to create pivot dashboard: %w", err)
 	}
 
@@ -55,7 +80,7 @@ func (r *Reporter) GenerateExcelReport(results *models.CollectionResults) error 
 }
 
 // createFindingsSheet creates the main findings data sheet
-func (r *Reporter) createFindingsSheet(f *excelize.File, results *models.CollectionResults) error {
+func (r *Reporter) createFindingsSheet(f *excelize.File, results *models.CollectionResults, headerStyle int) error {
 	sheetName := "Findings"
 	_, err := f.NewSheet(sheetName)
 	if err != nil {
@@ -76,11 +101,6 @@ func (r *Reporter) createFindingsSheet(f *excelize.File, results *models.Collect
 	}
 
 	// Style headers
-	headerStyle, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "FFFFFF"},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"366092"}, Pattern: 1},
-		Alignment: &excelize.Alignment{Horizontal: "center"},
-	})
 	f.SetCellStyle(sheetName, "A1", fmt.Sprintf("%c1", 'A'+len(headers)-1), headerStyle)
 
 	// Write data
@@ -123,7 +143,7 @@ func (r *Reporter) createFindingsSheet(f *excelize.File, results *models.Collect
 }
 
 // createSummarySheet creates the summary statistics sheet
-func (r *Reporter) createSummarySheet(f *excelize.File, results *models.CollectionResults) error {
+func (r *Reporter) createSummarySheet(f *excelize.File, results *models.CollectionResults, headerStyle, subHeaderStyle, highCriticalStyle int) error {
 	sheetName := "Summary"
 	_, err := f.NewSheet(sheetName)
 	if err != nil {
@@ -132,9 +152,12 @@ func (r *Reporter) createSummarySheet(f *excelize.File, results *models.Collecti
 
 	// Title
 	f.SetCellValue(sheetName, "A1", "GitHub Security Findings Summary")
-	titleStyle, _ := f.NewStyle(&excelize.Style{
+	titleStyle, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true, Size: 16},
 	})
+	if err != nil {
+		return err
+	}
 	f.SetCellStyle(sheetName, "A1", "A1", titleStyle)
 
 	row := 3
@@ -150,7 +173,6 @@ func (r *Reporter) createSummarySheet(f *excelize.File, results *models.Collecti
 
 	// Overall statistics
 	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "Overall Statistics")
-	headerStyle, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
 	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), headerStyle)
 	row++
 
@@ -174,7 +196,113 @@ func (r *Reporter) createSummarySheet(f *excelize.File, results *models.Collecti
 
 	row += 2
 
-	// Findings by type with attribution breakdown
+	// Findings by Pod with Type Breakdown
+	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "Findings by Pod")
+	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), headerStyle)
+	row++
+
+	// Headers for the pod breakdown table
+	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "Pod")
+	f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), "Code Scanning")
+	f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), "Secret Scanning")
+	f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), "Dependabot")
+	f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), "Total")
+	
+	// Style the sub-headers
+	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("E%d", row), subHeaderStyle)
+	row++
+
+	// Calculate findings by pod and type
+	findingsByPod := results.GetFindingsByPod()
+	
+	// Sort pods for consistent ordering
+	var pods []string
+	for pod := range findingsByPod {
+		pods = append(pods, pod)
+	}
+	sort.Strings(pods)
+
+	// Write pod data
+	for _, pod := range pods {
+		findings := findingsByPod[pod]
+		codeScanCount := 0
+		secretScanCount := 0
+		dependabotCount := 0
+		
+		for _, finding := range findings {
+			switch finding.Type {
+			case "code_scanning":
+				codeScanCount++
+			case "secrets":
+				secretScanCount++
+			case "dependabot":
+				dependabotCount++
+			}
+		}
+		
+		total := codeScanCount + secretScanCount + dependabotCount
+		
+		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), pod)
+		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), codeScanCount)
+		f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), secretScanCount)
+		f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), dependabotCount)
+		f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), total)
+		row++
+	}
+
+	row += 2
+
+	// High/Critical Severity Findings by Pod
+	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "High/Critical Severity Findings by Pod")
+	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), headerStyle)
+	row++
+
+	// Headers for high/critical severity breakdown
+	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "Pod")
+	f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), "Code Scanning (High/Critical)")
+	f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), "Secret Scanning (High/Critical)")
+	f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), "Dependabot (High/Critical)")
+	f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), "Total High/Critical")
+	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("E%d", row), subHeaderStyle)
+	row++
+
+	// Write high/critical severity data
+	for _, pod := range pods {
+		findings := findingsByPod[pod]
+		highCriticalCodeScan := 0
+		highCriticalSecrets := 0
+		highCriticalDependabot := 0
+		
+		for _, finding := range findings {
+			if finding.Severity == "high" || finding.Severity == "critical" || 
+			   finding.Severity == "High" || finding.Severity == "Critical" {
+				switch finding.Type {
+				case "code_scanning":
+					highCriticalCodeScan++
+				case "secrets":
+					highCriticalSecrets++
+				case "dependabot":
+					highCriticalDependabot++
+				}
+			}
+		}
+		
+		total := highCriticalCodeScan + highCriticalSecrets + highCriticalDependabot
+		
+		// Only show pods that have high/critical findings
+		if total > 0 {
+			f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), pod)
+			f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), highCriticalCodeScan)
+			f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), highCriticalSecrets)
+			f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), highCriticalDependabot)
+			f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), total)
+			row++
+		}
+	}
+
+	row += 2
+
+	// Original findings by type section
 	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "Findings by Type")
 	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), headerStyle)
 	row++
@@ -185,12 +313,6 @@ func (r *Reporter) createSummarySheet(f *excelize.File, results *models.Collecti
 	f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), "Attributed")
 	f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), "Unattributed")
 	f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), "Attribution %")
-	
-	// Style the sub-headers
-	subHeaderStyle, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"E7E6E6"}, Pattern: 1},
-	})
 	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("E%d", row), subHeaderStyle)
 	row++
 
@@ -237,25 +359,11 @@ func (r *Reporter) createSummarySheet(f *excelize.File, results *models.Collecti
 		row++
 	}
 
-	row += 2
-
-	// Findings by pod
-	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "Findings by Pod")
-	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), headerStyle)
-	row++
-
-	findingsByPod := results.GetFindingsByPod()
-	for pod, findings := range findingsByPod {
-		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), pod)
-		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), len(findings))
-		row++
-	}
-
 	return nil
 }
 
 // createRepositorySheet creates the repository information sheet
-func (r *Reporter) createRepositorySheet(f *excelize.File, results *models.CollectionResults) error {
+func (r *Reporter) createRepositorySheet(f *excelize.File, results *models.CollectionResults, headerStyle int) error {
 	sheetName := "Repositories"
 	_, err := f.NewSheet(sheetName)
 	if err != nil {
@@ -275,10 +383,6 @@ func (r *Reporter) createRepositorySheet(f *excelize.File, results *models.Colle
 	}
 
 	// Style headers
-	headerStyle, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "FFFFFF"},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"366092"}, Pattern: 1},
-	})
 	f.SetCellStyle(sheetName, "A1", fmt.Sprintf("%c1", 'A'+len(headers)-1), headerStyle)
 
 	// Write repository data
@@ -309,7 +413,7 @@ func (r *Reporter) createRepositorySheet(f *excelize.File, results *models.Colle
 }
 
 // createTimelineSheet creates the enhanced timeline analysis sheet with attribution breakdown and charts
-func (r *Reporter) createTimelineSheet(f *excelize.File, results *models.CollectionResults) error {
+func (r *Reporter) createTimelineSheet(f *excelize.File, results *models.CollectionResults, headerStyle, subHeaderStyle int) error {
 	sheetName := "Timeline"
 	_, err := f.NewSheet(sheetName)
 	if err != nil {
@@ -333,6 +437,11 @@ func (r *Reporter) createTimelineSheet(f *excelize.File, results *models.Collect
 		"Secret Scan (Attributed)", "Secret Scan (Unattributed)", 
 		"Dependabot (Attributed)", "Dependabot (Unattributed)",
 		"Total Attributed", "Total Unattributed",
+		// Add high/critical headers
+		"Code Scan (High/Critical)",
+		"Secret Scan (High/Critical)",
+		"Dependabot (High/Critical)",
+		"Total High/Critical",
 	}
 
 	// Write headers
@@ -342,18 +451,14 @@ func (r *Reporter) createTimelineSheet(f *excelize.File, results *models.Collect
 	}
 
 	// Style headers
-	headerStyle, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "FFFFFF"},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"366092"}, Pattern: 1},
-		Alignment: &excelize.Alignment{Horizontal: "center", WrapText: true},
-	})
 	f.SetCellStyle(sheetName, "A1", fmt.Sprintf("%c1", 'A'+len(headers)-1), headerStyle)
 
 	// Set column widths
 	f.SetColWidth(sheetName, "A", "A", 12) // Quarter
 	f.SetColWidth(sheetName, "B", "B", 14) // Total Findings  
 	f.SetColWidth(sheetName, "C", "H", 16) // Attribution columns
-	f.SetColWidth(sheetName, "I", "J", 14) // Totals
+	f.SetColWidth(sheetName, "I", "J", 14) // Attribution totals
+	f.SetColWidth(sheetName, "K", "N", 18) // High/Critical columns
 
 	// Write detailed timeline data
 	for i, quarter := range quarters {
@@ -366,10 +471,15 @@ func (r *Reporter) createTimelineSheet(f *excelize.File, results *models.Collect
 			secretScanAttr, secretScanUnattr   int
 			dependabotAttr, dependabotUnattr   int
 			totalAttr, totalUnattr             int
+			highCriticalCodeScan               int
+			highCriticalSecrets                int
+			highCriticalDependabot             int
 		)
 
 		for _, finding := range findings {
 			isAttributed := finding.Pod != "No Pod Selected"
+			isHighCritical := finding.Severity == "high" || finding.Severity == "critical" || 
+							 finding.Severity == "High" || finding.Severity == "Critical"
 			
 			switch finding.Type {
 			case "code_scanning":
@@ -378,17 +488,26 @@ func (r *Reporter) createTimelineSheet(f *excelize.File, results *models.Collect
 				} else {
 					codeScanUnattr++
 				}
+				if isHighCritical {
+					highCriticalCodeScan++
+				}
 			case "secrets":
 				if isAttributed {
 					secretScanAttr++
 				} else {
 					secretScanUnattr++
 				}
+				if isHighCritical {
+					highCriticalSecrets++
+				}
 			case "dependabot":
 				if isAttributed {
 					dependabotAttr++
 				} else {
 					dependabotUnattr++
+				}
+				if isHighCritical {
+					highCriticalDependabot++
 				}
 			}
 
@@ -398,6 +517,8 @@ func (r *Reporter) createTimelineSheet(f *excelize.File, results *models.Collect
 				totalUnattr++
 			}
 		}
+
+		totalHighCritical := highCriticalCodeScan + highCriticalSecrets + highCriticalDependabot
 
 		// Write data
 		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), quarter)
@@ -410,6 +531,11 @@ func (r *Reporter) createTimelineSheet(f *excelize.File, results *models.Collect
 		f.SetCellValue(sheetName, fmt.Sprintf("H%d", row), dependabotUnattr)
 		f.SetCellValue(sheetName, fmt.Sprintf("I%d", row), totalAttr)
 		f.SetCellValue(sheetName, fmt.Sprintf("J%d", row), totalUnattr)
+		// Write high/critical data
+		f.SetCellValue(sheetName, fmt.Sprintf("K%d", row), highCriticalCodeScan)
+		f.SetCellValue(sheetName, fmt.Sprintf("L%d", row), highCriticalSecrets)
+		f.SetCellValue(sheetName, fmt.Sprintf("M%d", row), highCriticalDependabot)
+		f.SetCellValue(sheetName, fmt.Sprintf("N%d", row), totalHighCritical)
 	}
 
 	// Add trending charts
@@ -426,7 +552,7 @@ func (r *Reporter) createTimelineSheet(f *excelize.File, results *models.Collect
 	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", summaryRow), fmt.Sprintf("A%d", summaryRow), headerStyle)
 
 	summaryRow += 2
-	r.createAttributionSummary(f, sheetName, summaryRow, results)
+	r.createAttributionSummary(f, sheetName, summaryRow, results, headerStyle)
 
 	return nil
 }
@@ -450,6 +576,14 @@ func (r *Reporter) createTimelineCharts(f *excelize.File, sheetName string, data
 				Values:     fmt.Sprintf("%s!$J$2:$J$%d", sheetName, dataRows+1),
 			},
 		},
+		Legend: excelize.ChartLegend{
+			Position: "bottom",
+		},
+		Title: []excelize.RichTextRun{
+			{
+				Text: "Attribution Trend Over Time",
+			},
+		},
 		PlotArea: excelize.ChartPlotArea{
 			ShowCatName:     false,
 			ShowLeaderLines: false,
@@ -457,57 +591,45 @@ func (r *Reporter) createTimelineCharts(f *excelize.File, sheetName string, data
 			ShowSerName:     true,
 			ShowVal:         false,
 		},
-		ShowBlanksAs: "gap",
 		Dimension: excelize.ChartDimension{
 			Width:  640,
 			Height: 320,
 		},
 	})
 	if err != nil {
-		// Log error but don't fail the sheet creation
 		fmt.Printf("Warning: Could not create attribution trend chart: %v\n", err)
 	}
 
-	// Chart 2: Finding Types Attribution Breakdown (Column Chart)
-	chart2Row := chartRow + 22
-	err = f.AddChart(sheetName, fmt.Sprintf("L%d", chart2Row), &excelize.Chart{
-		Type: excelize.Col,
+	// Chart 2: High/Critical Findings by Type (Line Chart)
+	chartRow += 20
+	err = f.AddChart(sheetName, fmt.Sprintf("L%d", chartRow), &excelize.Chart{
+		Type: excelize.Line,
 		Series: []excelize.ChartSeries{
 			{
-				Name:       "Code Scanning (Attributed)",
+				Name:       "Code Scanning (High/Critical)",
 				Categories: fmt.Sprintf("%s!$A$2:$A$%d", sheetName, dataRows+1),
-				Values:     fmt.Sprintf("%s!$C$2:$C$%d", sheetName, dataRows+1),
-				Fill:       excelize.Fill{Color: []string{"70AD47"}},
+				Values:     fmt.Sprintf("%s!$K$2:$K$%d", sheetName, dataRows+1),
+				Fill:       excelize.Fill{Color: []string{"4472C4"}},
 			},
 			{
-				Name:       "Code Scanning (Unattributed)",
+				Name:       "Secret Scanning (High/Critical)",
 				Categories: fmt.Sprintf("%s!$A$2:$A$%d", sheetName, dataRows+1),
-				Values:     fmt.Sprintf("%s!$D$2:$D$%d", sheetName, dataRows+1),
-				Fill:       excelize.Fill{Color: []string{"FFC000"}},
+				Values:     fmt.Sprintf("%s!$L$2:$L$%d", sheetName, dataRows+1),
+				Fill:       excelize.Fill{Color: []string{"ED7D31"}},
 			},
 			{
-				Name:       "Secret Scanning (Attributed)",
+				Name:       "Dependabot (High/Critical)",
 				Categories: fmt.Sprintf("%s!$A$2:$A$%d", sheetName, dataRows+1),
-				Values:     fmt.Sprintf("%s!$E$2:$E$%d", sheetName, dataRows+1),
-				Fill:       excelize.Fill{Color: []string{"5B9BD5"}},
-			},
-			{
-				Name:       "Secret Scanning (Unattributed)",
-				Categories: fmt.Sprintf("%s!$A$2:$A$%d", sheetName, dataRows+1),
-				Values:     fmt.Sprintf("%s!$F$2:$F$%d", sheetName, dataRows+1),
+				Values:     fmt.Sprintf("%s!$M$2:$M$%d", sheetName, dataRows+1),
 				Fill:       excelize.Fill{Color: []string{"A5A5A5"}},
 			},
+		},
+		Legend: excelize.ChartLegend{
+			Position: "bottom",
+		},
+		Title: []excelize.RichTextRun{
 			{
-				Name:       "Dependabot (Attributed)",
-				Categories: fmt.Sprintf("%s!$A$2:$A$%d", sheetName, dataRows+1),
-				Values:     fmt.Sprintf("%s!$G$2:$G$%d", sheetName, dataRows+1),
-				Fill:       excelize.Fill{Color: []string{"FF6F91"}},
-			},
-			{
-				Name:       "Dependabot (Unattributed)",
-				Categories: fmt.Sprintf("%s!$A$2:$A$%d", sheetName, dataRows+1),
-				Values:     fmt.Sprintf("%s!$H$2:$H$%d", sheetName, dataRows+1),
-				Fill:       excelize.Fill{Color: []string{"C55A5A"}},
+				Text: "High/Critical Findings Trend by Type",
 			},
 		},
 		PlotArea: excelize.ChartPlotArea{
@@ -522,16 +644,51 @@ func (r *Reporter) createTimelineCharts(f *excelize.File, sheetName string, data
 			Height: 320,
 		},
 	})
-	
 	if err != nil {
-		fmt.Printf("Warning: Could not create finding types breakdown chart: %v\n", err)
+		fmt.Printf("Warning: Could not create high/critical findings trend chart: %v\n", err)
+	}
+
+	// Chart 3: Total High/Critical Findings Trend (Line Chart)
+	chartRow += 20
+	err = f.AddChart(sheetName, fmt.Sprintf("L%d", chartRow), &excelize.Chart{
+		Type: excelize.Line,
+		Series: []excelize.ChartSeries{
+			{
+				Name:       "Total High/Critical Findings",
+				Categories: fmt.Sprintf("%s!$A$2:$A$%d", sheetName, dataRows+1),
+				Values:     fmt.Sprintf("%s!$N$2:$N$%d", sheetName, dataRows+1),
+				Fill:       excelize.Fill{Color: []string{"FF0000"}},
+			},
+		},
+		Legend: excelize.ChartLegend{
+			Position: "bottom",
+		},
+		Title: []excelize.RichTextRun{
+			{
+				Text: "Total High/Critical Findings Trend",
+			},
+		},
+		PlotArea: excelize.ChartPlotArea{
+			ShowCatName:     false,
+			ShowLeaderLines: false,
+			ShowPercent:     false,
+			ShowSerName:     true,
+			ShowVal:         false,
+		},
+		Dimension: excelize.ChartDimension{
+			Width:  640,
+			Height: 320,
+		},
+	})
+	if err != nil {
+		fmt.Printf("Warning: Could not create total high/critical findings trend chart: %v\n", err)
 	}
 	
 	return nil // Don't fail on chart errors
 }
 
 // createAttributionSummary creates a summary table of attribution stats
-func (r *Reporter) createAttributionSummary(f *excelize.File, sheetName string, startRow int, results *models.CollectionResults) {
+func (r *Reporter) createAttributionSummary(f *excelize.File, sheetName string, startRow int, results *models.CollectionResults, headerStyle int) {
 	// Count overall attribution by type
 	var (
 		codeScanAttr, codeScanUnattr     int
@@ -590,10 +747,6 @@ func (r *Reporter) createAttributionSummary(f *excelize.File, sheetName string, 
 	}
 
 	// Style the summary table
-	headerStyle, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true},
-		Fill: excelize.Fill{Type: "pattern", Color: []string{"E7E6E6"}, Pattern: 1},
-	})
 	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", startRow), fmt.Sprintf("E%d", startRow), headerStyle)
 }
 
@@ -607,7 +760,7 @@ func calculatePercentage(part, total int) string {
 }
 
 // createPivotDashboard creates pivot tables and dashboard
-func (r *Reporter) createPivotDashboard(f *excelize.File, results *models.CollectionResults) error {
+func (r *Reporter) createPivotDashboard(f *excelize.File, results *models.CollectionResults, headerStyle int) error {
 	sheetName := "Dashboard"
 	_, err := f.NewSheet(sheetName)
 	if err != nil {
@@ -616,22 +769,18 @@ func (r *Reporter) createPivotDashboard(f *excelize.File, results *models.Collec
 
 	// Title
 	f.SetCellValue(sheetName, "A1", "Security Findings Dashboard")
-	titleStyle, _ := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Size: 18},
-	})
-	f.SetCellStyle(sheetName, "A1", "A1", titleStyle)
+	f.SetCellStyle(sheetName, "A1", "A1", headerStyle)
 
 	// Quick stats cards
 	row := 3
 	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "Key Metrics")
-	headerStyle, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true, Size: 14}})
 	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), headerStyle)
 	row += 2
 
 	// Create metric cards
 	metrics := [][]interface{}{
 		{"Total Findings", len(results.Findings)},
-		{"High Severity", countBySeverity(results.Findings, "high")},
+		{"High/Critical Severity", countBySeverity(results.Findings, "high") + countBySeverity(results.Findings, "critical")},
 		{"Medium Severity", countBySeverity(results.Findings, "medium")},
 		{"Low Severity", countBySeverity(results.Findings, "low")},
 	}
@@ -640,20 +789,191 @@ func (r *Reporter) createPivotDashboard(f *excelize.File, results *models.Collec
 		col := 'A' + i*3
 		f.SetCellValue(sheetName, fmt.Sprintf("%c%d", col, row), metric[0])
 		f.SetCellValue(sheetName, fmt.Sprintf("%c%d", col, row+1), metric[1])
-		
-		// Style the metric cards
-		cardStyle, _ := f.NewStyle(&excelize.Style{
-			Fill: excelize.Fill{Type: "pattern", Color: []string{"E7E6E6"}, Pattern: 1},
-			Border: []excelize.Border{
-				{Type: "left", Color: "000000", Style: 1},
-				{Type: "top", Color: "000000", Style: 1},
-				{Type: "bottom", Color: "000000", Style: 1},
-				{Type: "right", Color: "000000", Style: 1},
-			},
-			Alignment: &excelize.Alignment{Horizontal: "center"},
-		})
-		f.SetCellStyle(sheetName, fmt.Sprintf("%c%d", col, row), fmt.Sprintf("%c%d", col, row+1), cardStyle)
+		f.SetCellStyle(sheetName, fmt.Sprintf("%c%d", col, row), fmt.Sprintf("%c%d", col, row+1), headerStyle)
 	}
+
+	row += 4
+
+	// High/Critical Findings by Quarter with Change
+	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "High/Critical Findings Quarterly Trend")
+	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), headerStyle)
+	row += 2
+
+	// Headers for quarterly trend
+	headers := []string{"Quarter", "High/Critical Count", "Change from Previous", "% Change"}
+	for i, header := range headers {
+		f.SetCellValue(sheetName, fmt.Sprintf("%c%d", 'A'+i, row), header)
+	}
+	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("D%d", row), headerStyle)
+	row++
+
+	// Get findings by quarter
+	findingsByQuarter := results.GetFindingsByQuarter()
+	var quarters []string
+	for quarter := range findingsByQuarter {
+		quarters = append(quarters, quarter)
+	}
+	sort.Strings(quarters)
+
+	var previousCount int
+	for i, quarter := range quarters {
+		findings := findingsByQuarter[quarter]
+		highCriticalCount := 0
+		for _, finding := range findings {
+			if finding.Severity == "high" || finding.Severity == "critical" ||
+				finding.Severity == "High" || finding.Severity == "Critical" {
+				highCriticalCount++
+			}
+		}
+
+		// Calculate change
+		change := 0
+		percentChange := "N/A"
+		if i > 0 {
+			change = highCriticalCount - previousCount
+			if previousCount > 0 {
+				percent := float64(change) / float64(previousCount) * 100
+				percentChange = fmt.Sprintf("%.1f%%", percent)
+			}
+		}
+
+		// Write data
+		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), quarter)
+		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), highCriticalCount)
+		if i > 0 {
+			changeStr := fmt.Sprintf("%+d", change) // Add + sign for positive numbers
+			f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), changeStr)
+			f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), percentChange)
+		}
+		previousCount = highCriticalCount
+		row++
+	}
+
+	row += 2
+
+	// Teams with Most High/Critical Findings
+	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "Teams with Most High/Critical Findings")
+	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), headerStyle)
+	row += 2
+
+	// Headers for team breakdown
+	teamHeaders := []string{"Team/Pod", "High/Critical Count", "Code Scanning", "Secret Scanning", "Dependabot"}
+	for i, header := range teamHeaders {
+		f.SetCellValue(sheetName, fmt.Sprintf("%c%d", 'A'+i, row), header)
+	}
+	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("E%d", row), headerStyle)
+	row++
+
+	// Count high/critical findings by pod
+	type podStats struct {
+		total         int
+		codeScanning int
+		secrets      int
+		dependabot   int
+	}
+	podFindings := make(map[string]*podStats)
+
+	for _, finding := range results.Findings {
+		if finding.Severity == "high" || finding.Severity == "critical" ||
+			finding.Severity == "High" || finding.Severity == "Critical" {
+			pod := finding.Pod
+			if pod == "" {
+				pod = "No Pod Selected"
+			}
+			if _, exists := podFindings[pod]; !exists {
+				podFindings[pod] = &podStats{}
+			}
+			stats := podFindings[pod]
+			stats.total++
+			switch finding.Type {
+			case "code_scanning":
+				stats.codeScanning++
+			case "secrets":
+				stats.secrets++
+			case "dependabot":
+				stats.dependabot++
+			}
+		}
+	}
+
+	// Convert to slice for sorting
+	type podWithStats struct {
+		pod   string
+		stats *podStats
+	}
+	var sortedPods []podWithStats
+	for pod, stats := range podFindings {
+		sortedPods = append(sortedPods, podWithStats{pod, stats})
+	}
+
+	// Sort by total high/critical findings
+	sort.Slice(sortedPods, func(i, j int) bool {
+		return sortedPods[i].stats.total > sortedPods[j].stats.total
+	})
+
+	// Write top 10 pods
+	for i := 0; i < len(sortedPods) && i < 10; i++ {
+		pod := sortedPods[i]
+		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), pod.pod)
+		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), pod.stats.total)
+		f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), pod.stats.codeScanning)
+		f.SetCellValue(sheetName, fmt.Sprintf("D%d", row), pod.stats.secrets)
+		f.SetCellValue(sheetName, fmt.Sprintf("E%d", row), pod.stats.dependabot)
+		row++
+	}
+
+	row += 2
+
+	// Finding Type Distribution for High/Critical
+	f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), "High/Critical Finding Type Distribution")
+	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), headerStyle)
+	row += 2
+
+	typeHeaders := []string{"Finding Type", "Count", "% of High/Critical"}
+	for i, header := range typeHeaders {
+		f.SetCellValue(sheetName, fmt.Sprintf("%c%d", 'A'+i, row), header)
+	}
+	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", row), fmt.Sprintf("C%d", row), headerStyle)
+	row++
+
+	// Count high/critical by type
+	findingTypes := map[string]int{
+		"Code Scanning": 0,
+		"Secret Scanning": 0,
+		"Dependabot": 0,
+	}
+	totalHighCritical := 0
+
+	for _, finding := range results.Findings {
+		if finding.Severity == "high" || finding.Severity == "critical" ||
+			finding.Severity == "High" || finding.Severity == "Critical" {
+			totalHighCritical++
+			switch finding.Type {
+			case "code_scanning":
+				findingTypes["Code Scanning"]++
+			case "secrets":
+				findingTypes["Secret Scanning"]++
+			case "dependabot":
+				findingTypes["Dependabot"]++
+			}
+		}
+	}
+
+	// Write finding type distribution
+	for typeName, count := range findingTypes {
+		percentage := 0.0
+		if totalHighCritical > 0 {
+			percentage = float64(count) / float64(totalHighCritical) * 100
+		}
+		f.SetCellValue(sheetName, fmt.Sprintf("A%d", row), typeName)
+		f.SetCellValue(sheetName, fmt.Sprintf("B%d", row), count)
+		f.SetCellValue(sheetName, fmt.Sprintf("C%d", row), fmt.Sprintf("%.1f%%", percentage))
+		row++
+	}
+
+	// Set column widths
+	f.SetColWidth(sheetName, "A", "A", 20)
+	f.SetColWidth(sheetName, "B", "E", 15)
 
 	return nil
 }
