@@ -63,6 +63,19 @@ func main() {
 				Name:  "include-closed",
 				Usage: "Include closed/resolved findings in addition to open ones",
 			},
+			&cli.IntFlag{
+				Name:  "workers",
+				Usage: "Number of parallel workers for processing repositories (default 25)",
+				Value: 25,
+			},
+			&cli.BoolFlag{
+				Name:  "eager-loading",
+				Usage: "Use eager loading optimizations to speed up processing",
+			},
+			&cli.BoolFlag{
+				Name:  "skip-empty",
+				Usage: "Skip repositories with no security features enabled to reduce API calls",
+			},
 			&cli.BoolFlag{
 				Name:  "dry-run",
 				Usage: "Show what would be processed without making API calls",
@@ -110,6 +123,9 @@ func run(c *cli.Context) error {
 		CSVOutput:            c.Bool("csv"),
 		NoCache:              c.Bool("no-cache"),
 		IncludeClosedFindings: c.Bool("include-closed"),
+		ParallelWorkers:      c.Int("workers"),
+		UseEagerLoading:      c.Bool("eager-loading"),
+		SkipEmptyRepos:       c.Bool("skip-empty"),
 		Token:                token,
 	}
 
@@ -183,7 +199,16 @@ func run(c *cli.Context) error {
 	logrus.Infof("- Secret scanning findings: %d", results.Stats.SecretsFindings)
 	logrus.Infof("- Dependabot findings: %d", results.Stats.DependabotFindings)
 	logrus.Infof("- API calls made: %d", results.Stats.APICallsTotal)
+	logrus.Infof("- Cache hits: %d", results.Stats.CacheHits)
+	logrus.Infof("- Skipped repositories: %d", results.Stats.SkippedRepos)
 	logrus.Infof("- Errors encountered: %d", len(results.Errors))
+	
+	// Performance info
+	logrus.Infof("Performance Information:")
+	logrus.Infof("- Parallel workers: %d", config.ParallelWorkers)
+	logrus.Infof("- Eager loading: %v", config.UseEagerLoading)
+	logrus.Infof("- Skip empty repos: %v", config.SkipEmptyRepos)
+	logrus.Infof("- Run duration: %v", results.Stats.Duration)
 
 	// Debug repository information
 	if c.Bool("debug") {

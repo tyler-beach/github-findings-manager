@@ -3,27 +3,62 @@ package collector
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/go-github/v57/github"
 
+	"github_findings_manager/pkg/cache"
 	"github_findings_manager/pkg/models"
 )
 
 // checkSecurityFeatures checks what security features are enabled for a repository
 func (c *Collector) checkSecurityFeatures(ctx context.Context, repo *models.Repository) {
-	// Check if code scanning is enabled
-	repo.CodeScanningEnabled = c.isCodeScanningEnabled(ctx, repo.Name)
-	
-	// Check if secret scanning is enabled
-	repo.SecretsEnabled = c.isSecretScanningEnabled(ctx, repo.Name)
-	
-	// Check if Dependabot is enabled
-	repo.DependabotEnabled = c.isDependabotEnabled(ctx, repo.Name)
+	// Optimize by checking features in parallel if eager loading is enabled
+	if c.config.UseEagerLoading {
+		var wg sync.WaitGroup
+		wg.Add(3) // Three features to check
+		
+		// Check features in parallel to speed up processing
+		go func() {
+			defer wg.Done()
+			repo.CodeScanningEnabled = c.isCodeScanningEnabled(ctx, repo.Name)
+		}()
+		
+		go func() {
+			defer wg.Done()
+			repo.SecretsEnabled = c.isSecretScanningEnabled(ctx, repo.Name)
+		}()
+		
+		go func() {
+			defer wg.Done()
+			repo.DependabotEnabled = c.isDependabotEnabled(ctx, repo.Name)
+		}()
+		
+		wg.Wait()
+		
+	} else {
+		// Sequential checks (original behavior)
+		repo.CodeScanningEnabled = c.isCodeScanningEnabled(ctx, repo.Name)
+		repo.SecretsEnabled = c.isSecretScanningEnabled(ctx, repo.Name)
+		repo.DependabotEnabled = c.isDependabotEnabled(ctx, repo.Name)
+	}
 }
 
 // isCodeScanningEnabled checks if code scanning is enabled for a repository
 func (c *Collector) isCodeScanningEnabled(ctx context.Context, repoName string) bool {
+	// Try to get from cache first
+	if c.cache != nil {
+		cacheKey := cache.GenerateKey("code_scanning_enabled", c.config.Organization, repoName)
+		if entry, hit := c.cache.Get(cacheKey); hit {
+			c.mu.Lock()
+			c.stats.CacheHits++
+			c.mu.Unlock()
+			enabled := len(entry.Data) > 0 && entry.Data[0] == 1
+			return enabled
+		}
+	}
+
 	if err := c.rateLimiter.Wait(ctx); err != nil {
 		return false
 	}
@@ -35,7 +70,25 @@ func (c *Collector) isCodeScanningEnabled(ctx context.Context, repoName string) 
 	
 	// If we get a 404, code scanning is not enabled
 	// If we get 200, it's enabled
-	return err == nil || (resp != nil && resp.StatusCode != 404)
+	enabled := err == nil || (resp != nil && resp.StatusCode != 404)
+	
+	// Cache the result for future queries
+	if c.cache != nil {
+		var data []byte
+		if enabled {
+			data = []byte{1} // true
+		} else {
+			data = []byte{0} // false
+		}
+		etag := ""
+		if resp != nil {
+			etag = resp.Header.Get("ETag")
+		}
+		c.cache.Set(cache.GenerateKey("code_scanning_enabled", c.config.Organization, repoName), 
+		            etag, data, defaultTTL)
+	}
+	
+	return enabled
 }
 
 // isSecretScanningEnabled checks if secret scanning is enabled for a repository

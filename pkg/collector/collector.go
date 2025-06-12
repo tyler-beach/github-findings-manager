@@ -17,8 +17,10 @@ import (
 )
 
 const (
-	maxWorkers     = 10
-	rateLimitBuffer = 100 // Keep 100 requests as buffer
+	defaultMaxWorkers = 25          // Increased from 10 to process more repos in parallel
+	rateLimitBuffer   = 100         // Keep 100 requests as buffer
+	defaultBurstLimit = 10          // Allow initial burst of requests
+	defaultTTL        = 24 * time.Hour // Default cache TTL
 )
 
 // Collector handles GitHub API interactions and data collection
@@ -52,7 +54,9 @@ func New(config *models.Config) *Collector {
 	}
 
 	// Initialize rate limiter to 5000 requests per hour (GitHub's limit)
-	rateLimiter := rate.NewLimiter(rate.Every(time.Hour/5000), 1)
+	// Allow for burst capacity to speed up initial load
+	ratePerSecond := float64(5000) / 3600 // 5000 requests per hour = ~1.39 req/sec
+	rateLimiter := rate.NewLimiter(rate.Limit(ratePerSecond), defaultBurstLimit)
 
 	return &Collector{
 		client:      client,
@@ -186,10 +190,17 @@ func (c *Collector) getAllRepositories(ctx context.Context) ([]*models.Repositor
 		}
 
 		for _, repo := range repos {
+			// Skip archived repositories
+			if repo.GetArchived() {
+				logrus.Debugf("Skipping archived repository: %s", repo.GetName())
+				continue
+			}
+
 			r := &models.Repository{
 				Name:        repo.GetName(),
 				FullName:    repo.GetFullName(),
 				LastUpdated: time.Now(),
+				IsArchived:  repo.GetArchived(),
 			}
 
 			// Get custom properties
@@ -230,6 +241,7 @@ func (c *Collector) getRepository(ctx context.Context, repoName string) (*models
 		Name:        repo.GetName(),
 		FullName:    repo.GetFullName(),
 		LastUpdated: time.Now(),
+		IsArchived:  repo.GetArchived(),
 	}
 
 	// Get custom properties
@@ -348,6 +360,12 @@ func (c *Collector) filterRepositories(repos []*models.Repository) []*models.Rep
 	var filtered []*models.Repository
 
 	for _, repo := range repos {
+		// Skip archived repositories
+		if repo.IsArchived {
+			logrus.Debugf("Filtering out archived repository: %s", repo.Name)
+			continue
+		}
+
 		// If custom properties aren't available, include all repos when no specific filters are set
 		includeRepo := true
 		
@@ -401,10 +419,15 @@ func (c *Collector) filterRepositories(repos []*models.Repository) []*models.Rep
 
 // processRepositoriesParallel processes repositories in parallel using worker pools
 func (c *Collector) processRepositoriesParallel(ctx context.Context, repos []*models.Repository) ([]*models.Finding, []models.CollectionError) {
-	workers := maxWorkers
+	workers := c.config.ParallelWorkers
+	if workers <= 0 {
+		workers = defaultMaxWorkers
+	}
 	if len(repos) < workers {
 		workers = len(repos)
 	}
+	
+	logrus.Infof("Using %d parallel workers to process %d repositories", workers, len(repos))
 
 	reposChan := make(chan *models.Repository, len(repos))
 	resultsChan := make(chan repositoryResult, len(repos))
@@ -469,6 +492,21 @@ func (c *Collector) processRepository(ctx context.Context, repo *models.Reposito
 	// Check security features availability
 	c.checkSecurityFeatures(ctx, repo)
 
+	// Skip repositories with no security features enabled if configured
+	if c.config.SkipEmptyRepos && 
+	   !repo.CodeScanningEnabled && 
+	   !repo.SecretsEnabled && 
+	   !repo.DependabotEnabled {
+		logrus.Debugf("Skipping repository %s - no security features enabled", repo.Name)
+		c.mu.Lock()
+		c.stats.SkippedRepos++
+		c.mu.Unlock()
+		return repositoryResult{
+			findings: allFindings,
+			errors:   errors,
+		}
+	}
+
 	// Collect Code Scanning findings
 	if repo.CodeScanningEnabled {
 		findings, errs := c.getCodeScanningFindings(ctx, repo)
@@ -492,7 +530,7 @@ func (c *Collector) processRepository(ctx context.Context, repo *models.Reposito
 
 	// Set attribution for findings
 	for _, finding := range allFindings {
-		if repo.Pod != "" {
+		if repo.Pod != "" && repo.Pod != "No Pod Selected" {
 			finding.Pod = repo.Pod
 			finding.Attribution = "attributed"
 		} else {

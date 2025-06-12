@@ -7,16 +7,19 @@ import (
 
 // Config holds the application configuration
 type Config struct {
-	Organization  string
-	EnvType       string
-	SpecificRepos []string
-	PodFilter     []string
-	OutputDir     string
-	Token         string
-	Verbose       bool
-	CSVOutput     bool
-	NoCache       bool
+	Organization          string
+	EnvType               string
+	SpecificRepos         []string
+	PodFilter             []string
+	OutputDir             string
+	Token                 string
+	Verbose               bool
+	CSVOutput             bool
+	NoCache               bool
 	IncludeClosedFindings bool // Whether to include closed/resolved findings
+	ParallelWorkers       int  // Number of parallel workers for processing repositories
+	UseEagerLoading       bool // Whether to use eager loading optimizations
+	SkipEmptyRepos        bool // Whether to skip repos with no security features
 	// Manual repository assignments when custom properties aren't available
 	RepoAssignments map[string]RepoAssignment
 }
@@ -37,6 +40,7 @@ type Repository struct {
 	SecretsEnabled      bool      `json:"secrets_enabled"`
 	DependabotEnabled   bool      `json:"dependabot_enabled"`
 	LastUpdated         time.Time `json:"last_updated"`
+	IsArchived          bool      `json:"is_archived"`
 	AccessErrors        []string  `json:"access_errors,omitempty"`
 }
 
